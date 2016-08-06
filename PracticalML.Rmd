@@ -1,0 +1,139 @@
+---
+title: "Human Activity Recognition"
+author: "Nimish Sanghi"
+date: "5 August 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
+```
+
+## Executive Summary
+
+In this project, the goal was to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner in which they did the exercise which is represented by "classe" variable in the training set. More information on the wasy dataset was collected is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+Training data with cross validation was used to fit random forest and validation set was used to assess out of sample accuracy. 
+
+## Data import and exploration
+
+Data
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data was first downloaded into the local directory and then read into R
+```{r}
+training <- read.csv("pml-training.csv", na.strings = c("NA",""))
+testing <- read.csv("pml-testing.csv", na.strings = c("NA",""))
+```
+
+We  then explore the data. First we see the number of rows available per user and then a table with number of rows for every user/activity(classe) combination
+
+```{r}
+table(training$user_name)
+table(training$user_name, training$classe)
+```
+
+We can see that there are 5 activities (labeled A to E) performed by 6 subjects. 
+
+## Data Exploration
+The data has lot of sparse columns. First exploration was to build a table which gives the distribution of NAs across the columns. 
+```{r}
+table(colSums(is.na(training[,-160])))
+```
+As we can see there are 100 columns which are mostly sparse, with 19216 NAs out of 19622 observations. All these columns were dropped from training and testing data set
+
+```{r}
+colsKeep <- c(colSums(is.na(training[,-160]))!=19216)
+training <- training[,colsKeep]
+testing <- testing[,colsKeep]
+```
+
+We also drop column 1 which is the row number
+```{r}
+training <- training[,-1]
+testing <- testing[,-1]
+```
+
+As I am not planning to use any time series analysis or time series summarization of data for analysis, I decided to drop all the time stamp related columns
+```{r}
+training <- training[,-c(2,3,4)]
+testing <- testing[,-c(2,3,4)]
+```
+Training set has some rows with new window = yes while test set has no row with new window = yes. Accordingly I decided to remove all the rows from training set which had new window = yes
+```{r}
+training <- training[training$new_window=="no",]
+```
+
+Finally I dropped the columns new widow and num window
+```{r}
+training <- training[,-c(2,3)]
+testing <- testing[,-c(2,3)]
+```
+
+## Model Building
+We now divide the training data into two sets. First set with 70% will be the training set and balance 30% will be the validation set to choose the algorithm to be used for predicting the classe for the actual test set
+```{r}
+require(caret)
+set.seed(12345)
+
+#logical vector to select the 70% training set
+trainingPartition <- createDataPartition(y=training$classe, p=0.7, list=FALSE)
+
+#validation set
+validation <- training[-trainingPartition,]
+
+#training set
+training <- training[trainingPartition,]
+```
+
+We first build a random forest model. We will use optimization methods as suggested in 
+https://github.com/lgreski/datasciencectacontent/blob/master/markdown/pml-randomForestPerformance.md
+```{r}
+require(parallel)
+require(doParallel)
+cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
+registerDoParallel(cluster)
+
+fitControl <- trainControl(method = "cv",
+                           number = 10,
+                           allowParallel = TRUE)
+
+# small training set used to test the report format in a fast iterative way
+#training_small <- training[c(1:50,5001:5050,8000:8050,10001:10050,12001:12050),]
+
+
+model_rf <- train(training[,-54], training[,54], 
+                  method="rf",trControl = fitControl)
+
+stopCluster(cluster)
+```
+### Confusion Matrix for training Set
+```{r}
+confusionMatrix.train(model_rf)
+```
+### Confusion Matric for Validation Set
+```{r}
+prediction_validation <- predict(model_rf, newdata=validation[,-54])
+cm <- confusionMatrix(prediction_validation, validation[,54])
+```
+
+As the Accuracy of random forest model used above is **`r cm$overall["Accuracy"] `** on the validation set(i.e. out of sample accuracy), I decided to not explore other methods. Also it took a fairly long time to run randowm forest on my machine and having got a satisfactory result I decided to take this as my final model to predict the classe on the actual test set.
+
+```{r}
+prediction_test <- predict(model_rf, newdata=testing[,-54])
+testset_prediction <- data.frame(problem_id=testing[,54], predicted_classe=prediction_test)
+testset_prediction
+```
+
+
+
+
+
+
